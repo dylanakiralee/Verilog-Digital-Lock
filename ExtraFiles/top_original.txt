@@ -1,0 +1,316 @@
+// top module
+
+module top (
+  hwclk,
+  keypad_r1,
+  keypad_r2,
+  keypad_r3,
+  keypad_c1,
+  keypad_c2,
+  keypad_c3,
+  led1,
+  led2,
+  led3,
+  led4,
+  led5,
+  led6,
+  led7,
+  led8
+);
+
+  input hwclk;
+
+  output keypad_r1;
+  output keypad_r2;
+  output keypad_r3;
+  input keypad_c1;
+  input keypad_c2;
+  input keypad_c3;
+
+  output led1;
+  output led2;
+  output led3;
+  output led4;
+  output led5;
+  output led6;
+  output led7;
+  output led8;
+
+  // state bits
+  parameter 
+  IDLE           = 5'b00000, // extra=00 led3=0 led2=0 led1=0 
+  INCORRECT_CODE = 5'b01000, // extra=01 led3=0 led2=0 led1=0 
+  INPUT_NEW_UC   = 5'b00101, // extra=00 led3=1 led2=0 led1=1 
+  INPUT_NEW_UC2  = 5'b00100, // extra=00 led3=1 led2=0 led1=0 
+  INPUT_PC       = 5'b01100, // extra=01 led3=1 led2=0 led1=0 
+  INPUT_UC       = 5'b00010, // extra=00 led3=0 led2=1 led1=0 
+  MATCHES        = 5'b10000, // extra=10 led3=0 led2=0 led1=0 
+  START          = 5'b00001, // extra=00 led3=0 led2=0 led1=1 
+  SUCCESS        = 5'b11000; // extra=11 led3=0 led2=0 led1=0 
+  assign led4 = state == START;
+  assign led5 = state == IDLE;
+  assign led6 = state == INPUT_UC;
+  assign led7 = state == INPUT_PC;
+  assign led8 = state == INPUT_NEW_UC;
+
+  reg [4:0] state;
+  reg [4:0] nextstate;
+
+  parameter[23:0] PC = { 4'd5, 4'd4, 4'd4, 4'd4, 4'd1, 4'd2 };
+  reg[2:0] PC_LENGTH = 3'd6;
+
+  reg RST;
+  reg BLINK_GO;
+  reg CODE_GO;
+  reg NEWCODE_GO;
+  reg[3:0] ENTER_BUTTON;
+  reg[4:0] OFF;
+  reg[4:0] ON;
+  reg[3:0] REPEAT;
+  reg[23:0] CODE;
+  reg[2:0] LENGTH;
+  reg[23:0] NEW_CODE;
+  reg[2:0] NEW_LENGTH;
+  reg[23:0] UC;
+  reg[2:0] UC_LENGTH;
+  reg LED;
+  reg[3:0] BUTTON;
+  reg BSTATE;
+
+  wire BLINK_DONE;
+  wire CODE_DONE;
+  wire CODE_SUCCESS;
+  wire NEWCODE_DONE;
+  wire NEWCODE_SUCCESS;
+
+  // Modules
+    enterDigit keypad(
+    .hwclk(hwclk),
+    .keypad_r1(keypad_r1),
+    .keypad_r2(keypad_r2),
+    .keypad_r3(keypad_r3),
+    .keypad_c1(keypad_c1),
+    .keypad_c2(keypad_c2),
+    .keypad_c3(keypad_c3),
+    .button(BUTTON),
+    .bstate(BSTATE)
+  );
+
+  blink blinky (
+    .CLK(hwclk),
+    .RST(RST),
+    .GO(BLINK_GO),
+    .ON(ON),
+    .OFF(OFF),
+    .REPEAT(REPEAT),
+    .DONE(BLINK_DONE),
+    .LED(LED)
+  );
+
+  enter_code pattern_matching (
+    .CLK(hwclk),
+    .RST(RST),
+    .GO(CODE_GO),
+    .BUTTON(BUTTON),
+    .BSTATE(BSTATE),
+    .CORRECT_CODE(CODE),
+    .LENGTH(LENGTH),
+    .ENTER_BUTTON(ENTER_BUTTON),
+    .SUCCESS(CODE_SUCCESS),
+    .DONE(CODE_DONE)//, .led5(led5), .led6(led6), .led7(led7), .led8(led8)
+  );
+
+  enter_new_code reprogramming (
+    .CLK(hwclk),
+    .RST(RST),
+    .GO(NEWCODE_GO),
+    .BUTTON(BUTTON),
+    .BSTATE(BSTATE),
+    .DONE(NEWCODE_DONE),
+    .SUCCESS(NEWCODE_SUCCESS),
+    .NEW_CODE(NEW_CODE),
+    .NEW_LENGTH(NEW_LENGTH)
+  );
+
+  reg led1reg;
+  reg[1:0] ledsel;
+  // comb always block
+  always @(*) begin
+    nextstate = 5'bxxxxx; // default to x because default_state_is_x is set
+    BLINK_GO = 0; // default
+    CODE_GO = 0; // default
+    NEWCODE_GO = 0; // default
+    ENTER_BUTTON[3:0] = 4'd0; // default
+    OFF[4:0] = 5'd0; // default
+    ON[4:0] = 5'd0; // default
+    REPEAT[3:0] = 4'd0; // default
+    RST = 0; // default
+    case (state)
+      IDLE          : begin
+      	nextstate = INPUT_UC;
+        CODE[23:0] = 24'b0;
+        LENGTH[2:0] = 3'b0;
+        ledsel = 2'b00;
+        RST = 1;
+        led1reg = 1;
+        /*if (BSTATE & BUTTON[3:0]==4'd9) begin
+          nextstate = INPUT_UC;
+        end
+        else if (BSTATE & BUTTON[3:0]==4'd8) begin
+          nextstate = INPUT_PC;
+        end
+        else begin
+          nextstate = IDLE;
+        end*/
+      end
+      INCORRECT_CODE: begin
+        BLINK_GO = 1;
+        OFF[4:0] = 5'd5;
+        ON[4:0] = 5'd10;
+        REPEAT[3:0] = 4'd3;
+        if (BLINK_DONE) begin
+          nextstate = IDLE;
+        end
+        else begin
+          nextstate = INCORRECT_CODE;
+        end
+      end
+      INPUT_NEW_UC  : begin
+        NEWCODE_GO = 1;
+        if ((NEWCODE_DONE & !NEWCODE_SUCCESS) | (BSTATE & BUTTON[3:0]==4'd7)) begin
+          nextstate = INCORRECT_CODE;
+        end
+        else if (NEWCODE_DONE  & NEWCODE_SUCCESS) begin
+          nextstate = INPUT_NEW_UC2;
+        end
+        else begin
+          nextstate = INPUT_NEW_UC;
+        end
+      end
+      INPUT_NEW_UC2 : begin
+        CODE[23:0] = NEW_CODE[23:0];
+        LENGTH[2:0] = NEW_LENGTH[2:0];
+        ENTER_BUTTON[3:0] = 4'd8;
+        CODE_GO = 1;
+        if (CODE_DONE & CODE_SUCCESS) begin
+          nextstate = MATCHES;
+        end
+        else if ((CODE_DONE & !CODE_SUCCESS) | (BSTATE & BUTTON[3:0]==4'd7)) begin
+          nextstate = INCORRECT_CODE;
+        end
+        else begin
+          nextstate = INPUT_NEW_UC2;
+        end
+      end
+      INPUT_PC      : begin
+        CODE[23:0] = PC[23:0];
+        LENGTH[2:0] = PC_LENGTH[2:0];
+        ENTER_BUTTON[3:0] = 4'd8;
+        CODE_GO = 1;
+        ledsel = 2'b10;
+        if (CODE_DONE & CODE_SUCCESS) begin
+          nextstate = INPUT_NEW_UC;
+        end
+        else if ((CODE_DONE & !CODE_SUCCESS) | (BSTATE & BUTTON[3:0]==4'd7)) begin
+          nextstate = INCORRECT_CODE;
+        end
+        else begin
+          nextstate = INPUT_PC;
+        end
+      end
+      INPUT_UC      : begin
+        CODE[23:0] = UC[23:0];
+        LENGTH[2:0] = UC_LENGTH[2:0];
+        ENTER_BUTTON[3:0] = 4'd9;
+        CODE_GO = 1;
+        ledsel = 2'b01;
+        if (CODE_DONE & CODE_SUCCESS) begin
+          nextstate = SUCCESS;
+        end
+        else if ((CODE_DONE & !CODE_SUCCESS) | (BSTATE & BUTTON[3:0]==4'd7)) begin
+          nextstate = INCORRECT_CODE;
+        end
+        else begin
+          nextstate = INPUT_UC;
+        end
+      end
+      MATCHES       : begin
+        OFF[4:0] = 5'd2;
+        ON[4:0] = 5'd2;
+        REPEAT[3:0] = 4'd5;
+        UC[23:0] = CODE[23:0];
+        UC_LENGTH[2:0] = LENGTH[2:0];
+        BLINK_GO = 1;
+        led1reg = !led1reg;
+        if (BLINK_DONE) begin
+          nextstate = IDLE;
+        end
+        else begin
+          nextstate = MATCHES;
+        end
+      end
+      START         : begin
+        CODE[23:0] = 24'b0;
+        LENGTH[2:0] = 3'b0;
+        UC[23:0] = { 4'd6, 4'd6, 4'd6, 4'd6, 4'd6, 4'd6 };
+        UC_LENGTH[2:0] = 3'd6;
+        led1reg = 1;
+        begin
+          nextstate = IDLE;
+        end
+      end
+      SUCCESS       : begin
+      	led1reg = 1;
+        begin
+          nextstate = IDLE;
+        end
+      end
+      default     : begin
+        nextstate = START;
+      end
+    endcase
+  end
+
+  // Assign reg'd outputs to state bits
+  assign led1 = led1reg;
+
+  
+  assign led2 = (ledsel==2'b01 & BLINK_GO) ? LED : state[1];
+  assign led3 = (ledsel==2'b10 & BLINK_GO) ? LED : state[2];
+
+  // sequential always block
+  always @(posedge hwclk) begin
+    $display("state:%b nextstate:%b NEW_CODE:%b CODE:%b", state, nextstate, NEW_CODE, CODE);
+      state <= nextstate;
+  end
+
+  // This code allows you to see state names in simulation
+  `ifndef SYNTHESIS
+  reg [111:0] statename;
+  always @* begin
+    case (state)
+      IDLE          :
+        statename = "IDLE";
+      INCORRECT_CODE:
+        statename = "INCORRECT_CODE";
+      INPUT_NEW_UC  :
+        statename = "INPUT_NEW_UC";
+      INPUT_NEW_UC2 :
+        statename = "INPUT_NEW_UC2";
+      INPUT_PC      :
+        statename = "INPUT_PC";
+      INPUT_UC      :
+        statename = "INPUT_UC";
+      MATCHES       :
+        statename = "MATCHES";
+      START         :
+        statename = "START";
+      SUCCESS       :
+        statename = "SUCCESS";
+      default       :
+        statename = "XXXXXXXXXXXXXX";
+    endcase
+  end
+  `endif
+
+endmodule

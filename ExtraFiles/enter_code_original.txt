@@ -1,0 +1,171 @@
+// Module to check whether the input matches the input CORRECT_CODE
+
+module enter_code (
+  CLK,
+  RST,
+  GO,
+  BUTTON,
+  BSTATE,
+  CORRECT_CODE,
+  LENGTH,
+  ENTER_BUTTON,
+  SUCCESS,
+  DONE,
+  led5, led6, led7, led8
+);
+
+  input CLK;
+  input RST;
+  input GO;
+  input[3:0] BUTTON;
+  input BSTATE;
+  input[23:0] CORRECT_CODE;
+  input[2:0] LENGTH;
+  input[3:0] ENTER_BUTTON;
+
+  output SUCCESS;
+  output DONE;
+  output led5, led6, led7, led8;
+
+  // state bits
+  parameter 
+  START     = 4'b0000, // extra=00 SUCCESS=0 DONE=0 
+  CORRECT   = 4'b0011, // extra=00 SUCCESS=1 DONE=1 
+  ENTER     = 4'b0100, // extra=01 SUCCESS=0 DONE=0 
+  INCORRECT = 4'b0001, // extra=00 SUCCESS=0 DONE=1 
+  WAIT      = 4'b1000, // extra=10 SUCCESS=0 DONE=0 
+  BUFFER    = 4'b1100; // extra=11 SUCCESS=0 DONE=0
+  assign led5 = state == ENTER; assign led6 = state == WAIT; assign led7 = kmatch; assign led8 = lmatch;
+
+  reg [3:0] state;
+  reg [3:0] nextstate;
+
+  reg lmatch;
+  reg kmatch;
+  reg[2:0] index;
+  reg[23:0] codeReg;
+
+  // datapath
+  always @(posedge CLK) begin
+    if (state == BUFFER) begin
+      codeReg[23:0] <= CORRECT_CODE[23:0];
+      index <= index + 1;
+    end
+    else if (state == ENTER) begin
+      if (BSTATE & BUTTON[3:0] != ENTER_BUTTON[3:0]) begin
+        codeReg <= codeReg << 4;
+        index <= index + 1;
+        if (index == 3'd0)
+          index <= 3'd7;
+      end
+    end
+    else begin
+      index <= 3'd0;
+    end
+  end
+  
+  always @(*) begin
+    if (state == ENTER) begin
+      if (BSTATE & BUTTON[3:0] != ENTER_BUTTON[3:0]) begin
+        kmatch = (BUTTON[3:0] == codeReg[23:20]);
+        lmatch = (index == LENGTH);
+      end
+    end
+    else begin
+      lmatch = 1;
+      kmatch = 1;
+    end
+  end
+
+  // comb always block
+  always @* begin
+    nextstate = 4'bxxxx; // default to x because default_state_is_x is set
+    case (state)
+      START    : begin
+        if (GO) begin
+          nextstate = BUFFER;
+        end
+        else begin
+          nextstate = START;
+        end
+      end
+      BUFFER   : begin
+        begin
+          nextstate = ENTER;
+        end
+      end
+      CORRECT  : begin
+        begin
+          nextstate = START;
+        end
+      end
+      ENTER    : begin
+        if (BUTTON[3:0] == ENTER_BUTTON[3:0] & BSTATE & lmatch) begin
+          nextstate = CORRECT;
+        end
+        else if (BUTTON[3:0] != ENTER_BUTTON[3:0] & BSTATE & !kmatch) begin
+          nextstate = WAIT;
+        end
+        else if (BUTTON[3:0] == ENTER_BUTTON[3:0] & !lmatch) begin
+          nextstate = INCORRECT;
+        end
+        else begin
+          nextstate = ENTER;
+        end
+      end
+      INCORRECT: begin
+        begin
+          nextstate = START;
+        end
+      end
+      WAIT     : begin
+        if (BUTTON[3:0] == ENTER_BUTTON[3:0] & BSTATE) begin
+          nextstate = INCORRECT;
+        end
+        else begin
+          nextstate = WAIT;
+        end
+      end
+    endcase
+  end
+
+  // Assign reg'd outputs to state bits
+  assign DONE = state[0];
+  assign SUCCESS = state[1];
+
+  // sequential always block
+  always @(posedge CLK) begin
+    if (RST)
+      state <= START;
+    else
+      state <= nextstate;
+  end
+  
+  always @(negedge CLK) begin
+    $display("state:%b nextstate:%b codeReg:%b BUTTON:%d kmatch:%b index:%d", state, nextstate, codeReg, BUTTON, kmatch, index);
+  end
+
+  // This code allows you to see state names in simulation
+  `ifndef SYNTHESIS
+  reg [71:0] statename;
+  always @* begin
+    case (state)
+      START    :
+        statename = "START";
+      BUFFER   :
+        statename = "BUFFER";
+      CORRECT  :
+        statename = "CORRECT";
+      ENTER    :
+        statename = "ENTER";
+      INCORRECT:
+        statename = "INCORRECT";
+      WAIT     :
+        statename = "WAIT";
+      default  :
+        statename = "XXXXXXXXX";
+    endcase
+  end
+  `endif
+
+endmodule
